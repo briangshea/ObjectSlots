@@ -1,7 +1,14 @@
-#ifndef _SLOTS_HPP_
-#define _SLOTS_HPP_
+#ifndef _OBJECTSLOTS_HPP_
+#define _OBJECTSLOTS_HPP_
 
 #include <functional>
+#ifdef OBJECTSLOTS_ENABLE_THREADS
+#define OBJECTSLOTS_THREADED
+#include <thread>
+#endif
+#ifdef OBJECTSLOTS_ENABLE_THREAD_SAFETY
+#define OBJECTSLOTS_THREAD_SAFE
+#endif
 
 namespace ObjectSlots {
 
@@ -24,13 +31,13 @@ template<class ReturnType, class ... Args>
 class Base {
     // If this fails, then the size of a function pointer
     // cannot be stored in a void* type and may cause
-    // issues. If you see this error please write an 
+    // issues. If you see this error please write an
     // issue provide the details of the system architecture
     // that is being used.
     static_assert(sizeof(void(*)()) <= sizeof(void*));
 public:
     virtual ~Base() = default;
-    
+
     /**
      * @brief Returns a pointer to the object associated with the slot.
      *        For SlotFunction, this will always be nullptr.
@@ -51,9 +58,6 @@ public:
      * @return The return value of the slot.
      */
     virtual ReturnType operator()(Args... args) const = 0;
-
-protected:
-    virtual bool isLambda() { return false; }
 };
 
 /**
@@ -115,7 +119,7 @@ private:
     const void *callback_;
     using self_type = SlotLambda<ReturnType, Args...>;
 public:
-    SlotLambda(std::function<ReturnType(Args...)> lambda, const void* cb) : 
+    SlotLambda(std::function<ReturnType(Args...)> lambda, const void* cb) :
         lambda_(lambda), callback_(cb)
     { }
 
@@ -125,38 +129,35 @@ public:
 
     const void* object() const override { return this; }
     const void* callback() const override { return callback_; }
-
-protected:
-    bool isLambda() override { return true; }
 };
 
 /**
  * @brief `ObjectSlots` is a base class that provides signal/slot functionality.
  *        Derived classes can emit signals, and other objects or functions can bind to these signals as slots.
- * 
+ *
  * Example Usage:
  * ```cpp
  * #include <iostream>
  * #include <slots/slots.hpp>
- * 
+ *
  * class MyEmitter : public Slots::ObjectSlots {
  * public:
  *     void valueChanged(int newValue) {
  *         emit(&MyEmitter::valueChanged, newValue);
  *     }
  * };
- * 
+ *
  * void globalFunctionSlot(int value) {
  *     std::cout << "Global function received: " << value << std::endl;
  * }
- * 
+ *
  * class MyReceiver {
  * public:
  *     void memberFunctionSlot(int value) {
  *         std::cout << "Member function received: " << value << std::endl;
  *     }
  * };
- * 
+ *
  * int main() {
  *     MyEmitter emitter;
  *     MyReceiver receiver;
@@ -168,6 +169,8 @@ protected:
  * ```
  */
 class ObjectSlots {
+private:
+    using LockP = void*;
 public:
     ObjectSlots();
     virtual ~ObjectSlots();
@@ -176,7 +179,7 @@ public:
     void bind(
         SlotMethodP<SignalType, ReturnType, Args...> signal,
         //T* object,
-        Func&& f) 
+        Func&& f)
     {
         union {
             SlotMethodP<SignalType, ReturnType, Args...> signal_ptr;
@@ -194,7 +197,7 @@ public:
 
     /**
      * @brief Binds a member function slot to a signal.
-     * 
+     *
      * @tparam SignalType The class type of the object emitting the signal.
      * @tparam ReturnType The return type of the signal and slot.
      * @tparam T The class type of the object owning the slot method.
@@ -302,7 +305,6 @@ public:
     }
 
 protected:
-    
     /**
      * @brief Emits a signal, invoking all bound slots.
      *
@@ -319,6 +321,9 @@ protected:
         SlotMethodP<T, void, Args...> callback,
         Args... args)
     {
+#ifdef OBJECTSLOTS_THREAD_SAFE
+        auto lock = acquireLock();
+#endif
         union {
             SlotMethodP<T, void, Args...> signal_ptr;
             void *ptr;
@@ -326,16 +331,20 @@ protected:
         to_void_ptr.signal_ptr = callback;
         int i = 0;
         while( void* slot = getSlot(to_void_ptr.ptr, i++) ) {
+#ifdef OBJECTSLOTS_THREADED
+            std::thread t( [slot, args...]() {
+
+                (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
+            });
+            t.detach();
+#else
             (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
+#endif
         }
+#ifdef OBJECTSLOTS_THREAD_SAFE
+        releaseLock(lock);
+#endif
     }
-
-    /**
-     * @brief `isSignal` returns true of the signal is valid signal method for
-     * this object.
-     */
-    virtual bool isSignal(void* signal) { return true; }
-
 private:
     struct impl;
     impl* impl_;
@@ -343,8 +352,12 @@ private:
     void* getSlot(void*, int);
     void slotStore(void*, void*);
     void slotRemove(void*, void*);
+#ifdef OBJECTSLOTS_THREAD_SAFE
+    LockP acquireLock();
+    void releaseLock(LockP);
+#endif
 };
 
 } // end namespace Slots
 
-#endif
+#endif //_OBJECTSLOTS_HPP_

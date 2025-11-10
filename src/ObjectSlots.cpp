@@ -2,6 +2,16 @@
 
 #include <map>
 #include <list>
+
+#ifdef OBJECTSLOTS_THREAD_SAFE
+#include <mutex>
+#include <shared_mutex>
+#define READLOCK()  std::shared_lock<std::shared_mutex> lock(impl_->mutex)
+#define WRITELOCK() std::unique_lock<std::shared_mutex> lock(impl_->mutex)
+#else
+#define READLOCK()
+#define WRITELOCK()
+#endif
 #include <vector>
 
 namespace ObjectSlots {
@@ -37,6 +47,10 @@ struct ObjectSlots::impl {
         }
     }
 
+#ifdef OBJECTSLOTS_THREAD_SAFE
+    mutable std::shared_mutex mutex;
+#endif
+
 private:
     SignalMap Signals;
 };
@@ -44,6 +58,7 @@ private:
 ObjectSlots::ObjectSlots() : impl_(new impl()) { }
 
 ObjectSlots::~ObjectSlots() {
+    WRITELOCK();
     delete impl_;
 }
 
@@ -56,10 +71,12 @@ void* ObjectSlots::getSlot(void* signal, int index) {
 }
 
 void ObjectSlots::slotStore(void* signal, void* slot) {
+    WRITELOCK();
     (*impl_)[signal].emplace_back(slot);
 }
 
 void ObjectSlots::slotRemove(void* object, void* slot) {
+    WRITELOCK();
     // mode:
     // 0 : no object or method (should never happen)
     // 1 : slot but no object
@@ -92,5 +109,14 @@ void ObjectSlots::slotRemove(void* object, void* slot) {
         ++it;
     }
 }
+
+#ifdef OBJECTSLOTS_THREAD_SAFE
+ObjectSlots::LockP ObjectSlots::acquireLock() {
+    return new std::shared_lock<std::shared_mutex>(impl_->mutex);
+}
+void ObjectSlots::releaseLock(ObjectSlots::LockP lock) {
+    delete reinterpret_cast<std::shared_lock<std::shared_mutex>*>(lock);
+}
+#endif
 
 } // end namespace Slots
