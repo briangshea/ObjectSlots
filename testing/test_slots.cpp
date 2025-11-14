@@ -69,7 +69,6 @@ int main(void) {
     //test->unbind( lambda );
     //test->operator()(test_string);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     delete test;
 
     return 0;

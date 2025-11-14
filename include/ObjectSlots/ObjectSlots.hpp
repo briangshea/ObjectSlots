@@ -4,6 +4,7 @@
 #include <functional>
 #ifdef OBJECTSLOTS_ENABLE_THREADS
 #define OBJECTSLOTS_THREADED
+#include <stack>
 #include <thread>
 #endif
 #ifdef OBJECTSLOTS_ENABLE_THREAD_SAFETY
@@ -321,28 +322,33 @@ protected:
         SlotMethodP<T, void, Args...> callback,
         Args... args)
     {
-#ifdef OBJECTSLOTS_THREAD_SAFE
-        auto lock = acquireLock();
-#endif
         union {
             SlotMethodP<T, void, Args...> signal_ptr;
             void *ptr;
         } to_void_ptr;
         to_void_ptr.signal_ptr = callback;
         int i = 0;
+        std::stack<std::thread> threads;
+#ifdef OBJECTSLOTS_THREAD_SAFE
+        auto lock = acquireLock();
+#endif
         while( void* slot = getSlot(to_void_ptr.ptr, i++) ) {
 #ifdef OBJECTSLOTS_THREADED
-            std::thread t( [slot, args...]() {
-
+            threads.emplace( [slot, args...]() {
                 (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
             });
-            t.detach();
 #else
             (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
 #endif
         }
 #ifdef OBJECTSLOTS_THREAD_SAFE
         releaseLock(lock);
+#endif
+#ifdef OBJECTSLOTS_THREADED
+        while(!threads.empty()) {
+            threads.top().join();
+            threads.pop();
+        }
 #endif
     }
 private:
