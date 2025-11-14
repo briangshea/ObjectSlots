@@ -328,7 +328,9 @@ protected:
         } to_void_ptr;
         to_void_ptr.signal_ptr = callback;
         int i = 0;
+#ifdef OBJECTSLOTS_THREADED
         std::stack<std::thread> threads;
+#endif
 #ifdef OBJECTSLOTS_THREAD_SAFE
         auto lock = acquireLock();
 #endif
