@@ -2,6 +2,9 @@
 #define _OBJECTSLOTS_HPP_
 
 #include <functional>
+#include <atomic>
+#include <vector>
+#include <memory>
 #ifdef OBJECTSLOTS_ENABLE_THREADS
 #define OBJECTSLOTS_THREADED
 #include <stack>
@@ -28,8 +31,14 @@ using SlotLambdaP = ReturnType (*)(Args...);
  * @tparam ReturnType The return type of the slot.
  * @tparam Args The argument types of the slot.
  */
+class SlotBase {
+public:
+    virtual ~SlotBase() = default;
+    std::atomic<bool> removed{false};
+};
+
 template<class ReturnType, class ... Args>
-class Base {
+class Base : public SlotBase {
     // If this fails, then the size of a function pointer
     // cannot be stored in a void* type and may cause
     // issues. If you see this error please write an
@@ -136,6 +145,12 @@ public:
  * @brief `ObjectSlots` is a base class that provides signal/slot functionality.
  *        Derived classes can emit signals, and other objects or functions can bind to these signals as slots.
  *
+ * Note on Callback Behavior:
+ * - Slots can safely call `unbind()` on themselves or other slots during an `emit()` sequence.
+ * - If a slot is unbound during an `emit()`, it will not be executed if it is scheduled
+ *   to be called later in the current emission sequence.
+ * - Slots bound after an `emit()` has started will not be called in that specific sequence.
+ *
  * Example Usage:
  * ```cpp
  * #include <iostream>
@@ -179,7 +194,6 @@ public:
     template<class SignalType, class ReturnType, typename Func, class ... Args>
     void bind(
         SlotMethodP<SignalType, ReturnType, Args...> signal,
-        //T* object,
         Func&& f)
     {
         union {
@@ -187,7 +201,13 @@ public:
             void *ptr;
         } to_void_ptr;
         to_void_ptr.signal_ptr = signal;
-        SlotLambda<ReturnType, Args...>* lambda = new SlotLambda<ReturnType, Args...>(f, &f);
+        
+        // Use a wrapper lambda to match the expected signature (ReturnType(Args...))
+        auto wrapper = [f = std::forward<Func>(f)](Args... args) mutable {
+            return f(args...);
+        };
+        
+        SlotLambda<ReturnType, Args...>* lambda = new SlotLambda<ReturnType, Args...>(wrapper, &f);
         slotStore(to_void_ptr.ptr, lambda);
     }
 
@@ -327,24 +347,34 @@ protected:
             void *ptr;
         } to_void_ptr;
         to_void_ptr.signal_ptr = callback;
-        int i = 0;
-#ifdef OBJECTSLOTS_THREADED
-        std::stack<std::thread> threads;
-#endif
+
+        std::vector<std::shared_ptr<SlotBase>> slotsSnapshot;
 #ifdef OBJECTSLOTS_THREAD_SAFE
         auto lock = acquireLock();
 #endif
-        while( void* slot = getSlot(to_void_ptr.ptr, i++) ) {
-#ifdef OBJECTSLOTS_THREADED
-            threads.emplace( [slot, args...]() {
-                (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
-            });
-#else
-            (*reinterpret_cast<Base<void, Args...>*>(slot))(args...);
-#endif
-        }
+        slotsSnapshot = getSlotsSnapshot(to_void_ptr.ptr);
 #ifdef OBJECTSLOTS_THREAD_SAFE
         releaseLock(lock);
+#endif
+
+#ifdef OBJECTSLOTS_THREADED
+        std::stack<std::thread> threads;
+#endif
+
+        for (auto& slotPtr : slotsSnapshot) {
+            if (slotPtr && !slotPtr->removed) {
+#ifdef OBJECTSLOTS_THREADED
+                threads.emplace( [slotPtr, args...]() {
+                    (*reinterpret_cast<Base<void, Args...>*>(slotPtr.get()))(args...);
+                });
+#else
+                (*reinterpret_cast<Base<void, Args...>*>(slotPtr.get()))(args...);
+#endif
+            }
+        }
+
+#ifdef OBJECTSLOTS_THREAD_SAFE
+        // The lock is already released above
 #endif
 #ifdef OBJECTSLOTS_THREADED
         while(!threads.empty()) {
@@ -357,6 +387,7 @@ private:
     struct impl;
     impl* impl_;
 
+    std::vector<std::shared_ptr<SlotBase>> getSlotsSnapshot(void* signal);
     void* getSlot(void*, int);
     void slotStore(void*, void*);
     void slotRemove(void*, void*);
