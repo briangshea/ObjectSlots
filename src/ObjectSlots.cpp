@@ -2,6 +2,7 @@
 
 #include <map>
 #include <list>
+#include <memory>
 
 #ifdef OBJECTSLOTS_THREAD_SAFE
 #include <mutex>
@@ -17,7 +18,7 @@
 namespace ObjectSlots {
 
 struct ObjectSlots::impl {
-    using SlotList = std::vector<void*>;
+    using SlotList = std::vector<std::shared_ptr<SlotBase>>;
     using SignalMap = std::map<const void*, SlotList>;
     using const_iterator = SignalMap::const_iterator;
     using iterator = SignalMap::iterator;
@@ -40,11 +41,7 @@ struct ObjectSlots::impl {
     inline SlotList& operator[](void* &&signal ) { return Signals[signal]; }
 
     ~impl() {
-        for( auto it = Signals.begin(); it != Signals.end(); ++it ) {
-            for( auto i = it->second.begin(); i != it->second.end(); ++i ) {
-                delete reinterpret_cast<Base<void>*>(*i);
-            }
-        }
+        // shared_ptr handles deletion automatically
     }
 
 #ifdef OBJECTSLOTS_THREAD_SAFE
@@ -62,17 +59,26 @@ ObjectSlots::~ObjectSlots() {
     delete impl_;
 }
 
+std::vector<std::shared_ptr<SlotBase>> ObjectSlots::getSlotsSnapshot(void* signal) {
+    READLOCK();
+    const auto& slots = impl_->find(signal);
+    if( slots != impl_->end() ) {
+        return slots->second;
+    }
+    return {};
+}
+
 void* ObjectSlots::getSlot(void* signal, int index) {
     const auto& slots = impl_->find(signal);
-    if( slots != impl_->end() && index < slots->second.size() ) {
-        return slots->second[index];
+    if( slots != impl_->end() && index < (int)slots->second.size() ) {
+        return slots->second[index].get();
     }
     return nullptr;
 }
 
 void ObjectSlots::slotStore(void* signal, void* slot) {
     WRITELOCK();
-    (*impl_)[signal].emplace_back(slot);
+    (*impl_)[signal].emplace_back(std::shared_ptr<SlotBase>(reinterpret_cast<SlotBase*>(slot)));
 }
 
 void ObjectSlots::slotRemove(void* object, void* slot) {
@@ -85,19 +91,20 @@ void ObjectSlots::slotRemove(void* object, void* slot) {
     const int mode = (object!=nullptr)<<1 | (slot!=nullptr);
     for( auto it = impl_->begin(); it != impl_->end(); ) {
         for( auto i = it->second.begin(); i != it->second.end();) {
-            Base<void> *SlotOrMethod = reinterpret_cast<Base<void>*>(*i);
+            SlotBase* base = i->get();
+            Base<void> *SlotOrMethod = reinterpret_cast<Base<void>*>(base);
             bool remove = false;
             switch (mode)
             {
-            case 1: remove = (SlotOrMethod->callback() == slot); break;
-            case 2: remove = (SlotOrMethod->object() == object); break;
-            case 3: remove = (SlotOrMethod->callback() == slot && SlotOrMethod->object() == object); break;
-            default: break;
+                case 1: remove = (SlotOrMethod->callback() == slot); break;
+                case 2: remove = (SlotOrMethod->object() == object); break;
+                case 3: remove = (SlotOrMethod->callback() == slot && SlotOrMethod->object() == object); break;
+                default: break;
             }
 
             if(remove) {
+                base->removed = true;
                 i = it->second.erase(i);
-                delete SlotOrMethod;
                 continue;
             }
             ++i;
