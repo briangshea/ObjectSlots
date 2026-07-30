@@ -1,0 +1,19 @@
+#ifndef _OBJECTSLOTS_CONFIG_HPP_
+#define _OBJECTSLOTS_CONFIG_HPP_
+
+#cmakedefine ENABLE_OBJECTSLOTS_V1
+#cmakedefine ENABLE_OBJECTSLOTS_V2
+#cmakedefine OBJECTSLOTS_ENABLE_THREADS
+#cmakedefine OBJECTSLOTS_ENABLE_THREAD_SAFETY
+
+#if defined(ENABLE_OBJECTSLOTS_V2)
+# define INLINE_V1
+# define INLINE_V2 inline
+#elif defined(ENABLE_OBJECTSLOTS_V1)
+# define INLINE_V1 inline
+# define INLINE_V2
+#else
+# error "No versions enabled"
+#endif
+
+#endif //_OBJECTSLOTS_CONFIG_HPP_
