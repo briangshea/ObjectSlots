@@ -8,7 +8,7 @@
 #include <random>
 
 // Test class that acts as an emitter with 1 signal
-class DataEmitter : public Signals::SlotBase {
+class DataEmitter : public Signals::SignalBase {
 public:
     // The signal is public so ANY external component can call .bind() cleanly
     Signals::v2::Signal<void(int)> Event;

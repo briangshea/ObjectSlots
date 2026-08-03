@@ -19,15 +19,15 @@ inline namespace v2 {
 template <typename Signature> class Signal;
 template <typename Signature> class _ConnectionToken;
 
-class SlotBase {
+class SignalBase {
 protected:
-    SlotBase() = default;
-    ~SlotBase() = default;
+    SignalBase() = default;
+    ~SignalBase() = default;
 
 public:
     class _UniversalPasskey {
     private:
-        friend class SlotBase;
+        friend class SignalBase;
         constexpr _UniversalPasskey() = default;
     };
 
@@ -55,7 +55,7 @@ public:
     };
 
 private:
-    using _AccessKey = SlotBase::_UniversalPasskey;
+    using _AccessKey = SignalBase::_UniversalPasskey;
     std::list<std::shared_ptr<ConnectionState>> connections;
     mutable std::shared_mutex listMutex; 
 
@@ -184,10 +184,19 @@ public:
     }
 };
 
-template <typename ReturnType, typename... Args>
-class _ConnectionToken<ReturnType(Args...)> {
+class ConnectionBase {
 public:
-    // FIX: Mapped to Signal::ConnectionState instead of recursively pointing to itself
+    virtual ~ConnectionBase() = default;
+    
+    virtual void block() noexcept = 0;
+    virtual void unblock() noexcept = 0;
+    virtual void disconnect() = 0;
+    virtual bool isValid() const noexcept = 0;
+};
+
+template <typename ReturnType, typename... Args>
+class _ConnectionToken<ReturnType(Args...)> : public ConnectionBase {
+public:
     using StateType = typename Signal<ReturnType(Args...)>::ConnectionState;
 
     _ConnectionToken() = default;
@@ -203,9 +212,10 @@ public:
         return *this;
     }
     
-    void block() noexcept { if (connectionState) connectionState->blocked.store(true, std::memory_order_release); }
-    void unblock() noexcept { if (connectionState) connectionState->blocked.store(false, std::memory_order_release); }
-    void disconnect() { if (connectionState) { connectionState->active.store(false, std::memory_order_release); connectionState.reset(); } }
+    void block() noexcept override { if (connectionState) connectionState->blocked.store(true, std::memory_order_release); }
+    void unblock() noexcept override { if (connectionState) connectionState->blocked.store(false, std::memory_order_release); }
+    void disconnect() override { if (connectionState) { connectionState->active.store(false, std::memory_order_release); connectionState.reset(); } }
+    bool isValid() const noexcept override { return connectionState && connectionState->active.load(std::memory_order_acquire); }
 
 private:
     std::shared_ptr<StateType> connectionState;

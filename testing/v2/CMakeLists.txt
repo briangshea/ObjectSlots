@@ -29,3 +29,11 @@ target_link_libraries(test_segfault_stress_v2
     Catch2::Catch2WithMain
   )
 catch_discover_tests(test_segfault_stress_v2 DISCOVERY_TIMEOUT 30)
+
+add_executable(test_connection_base test_connection_base.cpp)
+target_link_libraries(test_connection_base
+  PRIVATE
+    ObjectSlots
+    Catch2::Catch2WithMain
+  )
+catch_discover_tests(test_connection_base DISCOVERY_TIMEOUT 30)

@@ -9,7 +9,7 @@
 #include <algorithm>
 
 // Test class that acts as an emitter with 1 signal
-class DataEmitter : public Signals::SlotBase {
+class DataEmitter : public Signals::SignalBase {
 public:
     // The signal is public so ANY external component can call .bind() cleanly
     Signals::Signal<void(int)> Event;
@@ -137,16 +137,16 @@ TEST_CASE("Performance_MultipleHandlers", "[v2][performance]") {
 
 // Performance test: Event emission with different data types
 TEST_CASE("Performance_DifferentDataTypes", "[v2][performance]") {
-    class StringEmitter : public Signals::SlotBase {
-    public:
+    class StringEmitter : public Signals::SignalBase {
+public:
         Signals::Signal<void(const std::string&)> StringEvent;
         void emitString(const std::string& str) {
             StringEvent(emit_key(), this, str);
         }
     };
     
-    class IntEmitter : public Signals::SlotBase {
-    public:
+    class IntEmitter : public Signals::SignalBase {
+public:
         Signals::Signal<void(int)> IntEvent;
         void emitInt(int value) {
             IntEvent(emit_key(), this, value);
@@ -344,8 +344,8 @@ TEST_CASE("Performance_BlockingUnblocking", "[v2][performance]") {
 
 // Performance test: Large data structures
 TEST_CASE("Performance_LargeDataStructures", "[v2][performance]") {
-    class DataEmitterLarge : public Signals::SlotBase {
-    public:
+    class DataEmitterLarge : public Signals::SignalBase {
+public:
         Signals::Signal<void(std::vector<int>)> LargeEvent;
         void emitLarge(const std::vector<int>& data) {
             LargeEvent(emit_key(), this, data);
